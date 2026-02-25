@@ -5,61 +5,131 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>暗記ノート - Markdown Learning App</title>
     
-    <!-- Tailwind CSS (スタイリング) & Typography プラグイン (Markdown綺麗に表示) -->
+    <!-- Tailwind CSS & Typography -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
     
-    <!-- Vue 3 (UI状態管理) -->
+    <!-- Vue 3 -->
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     
-    <!-- Marked.js (Markdownパース) -->
+    <!-- Marked.js -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     
-    <!-- Dexie.js (IndexedDBローカル保存) -->
+    <!-- Dexie.js -->
     <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
 
     <style>
-        /* --- Zenn風カスタマイズ & 暗記用CSS --- */
+        /* --- 全体・暗記用CSS --- */
         body { font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif; background-color: #F8F9FA; color: #333; }
         
         /* 蛍光ペン（ハイライト） */
-        .highlight { background: linear-gradient(transparent 60%, #FEF08A 40%); font-weight: bold; }
+        .highlight { background-image: linear-gradient(transparent 60%, #FEF08A 40%); font-weight: bold; }
         
         /* 穴埋め要素の基本スタイル */
-        .blank-hole { cursor: pointer; user-select: none; transition: all 0.2s; display: inline-block; padding: 0.1rem 0.5rem; margin: 0 0.2rem; border-radius: 6px; font-weight: bold; font-size: 0.9em;}
-        /* State 0: 隠す（グレー背景） */
+        .blank-hole { cursor: pointer; user-select: none; transition: all 0.2s; display: inline-block; padding: 0.1rem 0.5rem; margin: 0 0.2rem; border-radius: 6px; font-weight: bold; font-size: 0.9em; position: relative;}
+        
+        /* State 0: 隠す */
         .blank-hole[data-state="0"] { background-color: #E2E8F0; color: #64748B; border: 1px solid #CBD5E1; }
-        /* State 1: ヒント（1文字表示） */
+        /* State 1: ヒント */
         .blank-hole[data-state="1"] { background-color: #F1F5F9; color: #334155; border: 1px dashed #94A3B8; }
-        /* State 2: 全表示（アクセントカラー） */
+        /* State 2: 全表示 */
         .blank-hole[data-state="2"] { background-color: transparent; color: #0EA5E9; border-bottom: 2px solid #BAE6FD; border-radius: 0; padding: 0.1rem 0.2rem;}
+
+        /* --- 印刷用フッター（通常時は非表示） --- */
+        .print-footer { display: none; }
 
         /* --- PDF出力（印刷）用モードのCSS --- */
         @media print {
+            @page { margin: 15mm; }
             .no-print { display: none !important; }
             body { background-color: white !important; }
             .prose { max-width: 100% !important; }
+
+            /* 謎の黒塗り防止: 印刷時はグラデーションを無効にし、単色の黄色にする */
+            .highlight { 
+                background: none !important; 
+                background-color: #FEF08A !important; 
+                -webkit-print-color-adjust: exact !important; 
+                print-color-adjust: exact !important; 
+            }
+
+            /* 印刷フッターの表示 */
+            .print-footer {
+                display: block !important;
+                position: fixed;
+                bottom: 0;
+                right: 0;
+                font-size: 10pt;
+                color: #888;
+                background-color: white;
+                padding-top: 10px;
+            }
         }
 
-        /* 印刷モード: 穴埋めテスト用（強制的にState 0の見た目にする） */
-        .print-mode-hole .blank-hole { background-color: #E2E8F0 !important; color: transparent !important; border: 1px solid #CBD5E1 !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-        .print-mode-hole .blank-hole::before { content: attr(data-num); color: #64748B; font-size: 0.8rem;}
+        /* 印刷モード: テスト用紙 (文字を透明化して幅を保つ＋中央に番号表示) */
+        .print-mode-hole .blank-hole { 
+            background-color: #E2E8F0 !important; 
+            color: transparent !important; 
+            border: 1px solid #CBD5E1 !important; 
+            print-color-adjust: exact; 
+            -webkit-print-color-adjust: exact; 
+        }
+        .print-mode-hole .blank-hole::before { 
+            content: attr(data-num); 
+            color: #64748B; 
+            font-size: 0.8rem; 
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+        }
 
-        /* 印刷モード: 朱色（赤シート）用 */
-        .print-mode-red .blank-hole { background-color: transparent !important; color: #FF5555 !important; border: none !important; border-bottom: 1px dashed #FF5555 !important; padding: 0; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+        /* 印刷モード: 赤シート用 */
+        .print-mode-red .blank-hole { 
+            background-color: transparent !important; 
+            color: #FF5555 !important; 
+            border: none !important; 
+            border-bottom: 1px dashed #FF5555 !important; 
+            padding: 0; 
+            print-color-adjust: exact; 
+            -webkit-print-color-adjust: exact; 
+        }
     </style>
 </head>
 <body>
     <div id="app" class="min-h-screen pb-20">
+        
+        <!-- ハンバーガーメニュー用の背景オーバーレイ -->
+        <div v-if="isMenuOpen" @click="isMenuOpen = false" class="fixed inset-0 z-40 no-print"></div>
+
         <!-- ヘッダー -->
-        <header class="bg-white shadow-sm sticky top-0 z-10 no-print">
-            <div class="max-w-4xl mx-auto px-4 py-4 flex justify-between items-center">
+        <header class="bg-white shadow-sm sticky top-0 z-50 no-print">
+            <div class="max-w-4xl mx-auto px-4 py-4 flex justify-between items-center relative">
                 <h1 class="text-xl font-bold text-gray-800 cursor-pointer hover:text-blue-500 transition" @click="changeView('list')">
                     📚 暗記ノート
                 </h1>
-                <button v-if="currentView === 'list'" @click="createNewNote" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg font-bold shadow transition">
-                    ＋ 新規作成
+                
+                <!-- ハンバーガーボタン -->
+                <button @click="isMenuOpen = !isMenuOpen" class="text-gray-600 hover:text-blue-500 focus:outline-none p-2 transition">
+                    <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path v-if="!isMenuOpen" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+                        <path v-else stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
                 </button>
+
+                <!-- ドロップダウンメニュー -->
+                <div v-if="isMenuOpen" class="absolute right-4 top-16 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-50 overflow-hidden">
+                    <a href="#" @click.prevent="changeView('list'); isMenuOpen = false" class="block px-4 py-3 text-gray-700 hover:bg-gray-50 font-bold border-b border-gray-100">🏠 トップへ戻る</a>
+                    <a href="#" @click.prevent="changeView('settings'); isMenuOpen = false" class="block px-4 py-3 text-gray-700 hover:bg-gray-50 font-bold">⚙️ 設定</a>
+                    
+                    <div v-if="currentView === 'study'">
+                        <div class="border-t border-gray-100 my-1"></div>
+                        <div class="px-4 py-2 text-xs font-bold text-gray-400 uppercase tracking-wider">🖨️ PDF出力 / 印刷</div>
+                        <a href="#" @click.prevent="printPDF('normal')" class="block px-4 py-3 text-gray-700 hover:bg-gray-50 text-sm">📄 通常モード</a>
+                        <a href="#" @click.prevent="printPDF('hole')" class="block px-4 py-3 text-gray-700 hover:bg-gray-50 text-sm">📝 テスト用紙 (空欄)</a>
+                        <a href="#" @click.prevent="printPDF('red')" class="block px-4 py-3 text-gray-700 hover:bg-gray-50 text-sm">📕 赤シート用 (朱色文字)</a>
+                    </div>
+                </div>
             </div>
         </header>
 
@@ -67,7 +137,12 @@
             
             <!-- 【画面1】 ノート一覧画面 -->
             <div v-if="currentView === 'list'">
-                <div v-if="notes.length === 0" class="text-center py-20 text-gray-500">
+                <div class="flex justify-end mb-4 no-print">
+                    <button @click="createNewNote" class="bg-blue-500 hover:bg-blue-600 text-white px-5 py-2.5 rounded-lg font-bold shadow transition">
+                        ＋ 新規作成
+                    </button>
+                </div>
+                <div v-if="notes.length === 0" class="text-center py-20 text-gray-500 bg-white rounded-xl shadow-sm border border-gray-100">
                     <p class="text-lg">ノートがありません。</p>
                     <p class="text-sm mt-2">「＋ 新規作成」から最初のノートを作成しましょう。</p>
                 </div>
@@ -77,7 +152,7 @@
                         <p class="text-sm text-gray-500 mb-4">{{ new Date(note.updatedAt).toLocaleString() }}</p>
                         <div class="flex justify-between items-center no-print">
                             <span class="text-blue-500 text-sm font-bold">学習する ➔</span>
-                            <button @click.stop="editNote(note)" class="text-gray-400 hover:text-gray-600 text-sm">編集</button>
+                            <button @click.stop="editNote(note)" class="text-gray-400 hover:text-gray-600 text-sm font-bold bg-gray-50 px-3 py-1 rounded">編集</button>
                         </div>
                     </div>
                 </div>
@@ -92,39 +167,45 @@
                 <textarea v-model="currentNote.content" placeholder="# 見出し&#10;ここは{{暗記}}する場所です。&#10;ここは==重要==です。" class="w-full h-96 p-4 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 resize-y font-mono text-sm leading-relaxed"></textarea>
                 
                 <div class="flex justify-end gap-3 mt-4">
-                    <button v-if="currentNote.id" @click="deleteNote(currentNote.id)" class="px-4 py-2 text-red-500 hover:bg-red-50 rounded-lg transition">削除</button>
-                    <button @click="changeView('list')" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition">キャンセル</button>
+                    <button v-if="currentNote.id" @click="deleteNote(currentNote.id)" class="px-4 py-2 text-red-500 hover:bg-red-50 rounded-lg transition font-bold">削除</button>
+                    <button @click="changeView('list')" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition font-bold">キャンセル</button>
                     <button @click="saveNote" class="px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-lg shadow transition">保存する</button>
                 </div>
             </div>
 
             <!-- 【画面3】 学習（閲覧）画面 -->
             <div v-if="currentView === 'study'" :class="printModeClass">
-                <!-- PDF出力用ツールバー -->
-                <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 mb-6 flex flex-wrap gap-4 items-center justify-between no-print">
-                    <div class="flex items-center gap-2">
-                        <span class="text-sm font-bold text-gray-600">表示モード:</span>
-                        <select v-model="printMode" class="bg-gray-50 border border-gray-200 text-gray-700 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2">
-                            <option value="normal">通常（タップで暗記）</option>
-                            <option value="hole">テスト用紙（全穴埋め）</option>
-                            <option value="red">赤シート用（朱色文字）</option>
-                        </select>
-                    </div>
-                    <button @click="printPDF" class="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition shadow-sm">
-                        🖨️ PDFで出力
-                    </button>
-                </div>
-
-                <!-- ノート本文 (Zennライクなスタイル) -->
+                <!-- ノート本文 -->
                 <div class="bg-white p-8 md:p-12 rounded-2xl shadow-sm border border-gray-100">
                     <h1 class="text-3xl font-bold text-gray-900 mb-8 pb-4 border-b-2 border-gray-100">{{ currentNote.title }}</h1>
                     
-                    <!-- Markdownをパースして流し込む場所 -->
+                    <!-- Markdown流し込み場所 -->
                     <div class="prose prose-slate prose-lg max-w-none" v-html="parsedContent"></div>
                 </div>
                 
-                <div class="mt-6 text-center no-print">
-                    <button @click="changeView('list')" class="text-gray-500 hover:text-gray-700 underline">← 一覧に戻る</button>
+                <!-- 印刷時のみ表示されるフッター -->
+                <div class="print-footer">
+                    Created with 暗記ノート App
+                </div>
+            </div>
+
+            <!-- 【画面4】 設定画面 -->
+            <div v-if="currentView === 'settings'" class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 max-w-md mx-auto mt-10">
+                <h2 class="text-xl font-bold text-gray-800 mb-6 border-b pb-2">⚙️ アプリ設定</h2>
+                
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <p class="font-bold text-gray-700">1文字ヒントをスキップ</p>
+                        <p class="text-xs text-gray-500 mt-1">タップ時に「隠す ➔ 全表示 ➔ 隠す」の2段階に切り替えます。</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" v-model="settings.skipHint" class="sr-only peer">
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+                    </label>
+                </div>
+                
+                <div class="mt-8 text-center">
+                    <button @click="changeView('list')" class="text-blue-500 hover:underline font-bold text-sm">トップに戻る</button>
                 </div>
             </div>
 
@@ -133,10 +214,14 @@
 
     <!-- アプリケーションのロジック -->
     <script>
-        // --- 1. グローバル関数（穴埋めのタップ処理） ---
-        // Vueの管理外(v-html内)の要素のクリックを処理するため、グローバルに定義します。
+        // --- 1. グローバル設定（設定画面と同期） ---
+        window.appSettings = {
+            skipHint: localStorage.getItem('anki_skipHint') === 'true'
+        };
+
+        // --- 2. 穴埋めのタップ処理 (グローバル関数) ---
         window.toggleHole = function(el) {
-            // テスト用紙/赤シートモードの時はタップを無効化
+            // 印刷モードのときはタップ無効
             if(document.getElementById('app').querySelector('.print-mode-hole, .print-mode-red')) return;
 
             const state = parseInt(el.getAttribute('data-state') || '0');
@@ -144,9 +229,15 @@
             const num = el.getAttribute('data-num');
 
             if (state === 0) {
-                // State 1: ヒント（1文字目 + ...）
-                el.setAttribute('data-state', '1');
-                el.innerText = answer.charAt(0) + '...';
+                if (window.appSettings.skipHint) {
+                    // スキップ設定ON: いきなりState 2 (全表示)
+                    el.setAttribute('data-state', '2');
+                    el.innerText = answer;
+                } else {
+                    // 通常: State 1 (ヒント: 1文字目 + ...)
+                    el.setAttribute('data-state', '1');
+                    el.innerText = answer.charAt(0) + '...';
+                }
             } else if (state === 1) {
                 // State 2: 全表示
                 el.setAttribute('data-state', '2');
@@ -158,23 +249,27 @@
             }
         };
 
-        // --- 2. データベースの初期化 (Dexie.js) ---
+        // --- 3. データベースの初期化 (Dexie.js) ---
         const db = new Dexie('AnkiNoteDB');
         db.version(1).stores({
-            notes: '++id, title, updatedAt' // contentはインデックス不要なので省略
+            notes: '++id, title, updatedAt'
         });
 
-        // --- 3. Vueアプリの初期化 ---
+        // --- 4. Vueアプリの初期化 ---
         const { createApp } = Vue;
 
         createApp({
             data() {
                 return {
-                    currentView: 'list', // 'list', 'edit', 'study'
-                    notes: [],
-                    currentNote: { title: '', content: '' },
+                    currentView: 'list', // 'list', 'edit', 'study', 'settings'
+                    notes:currentNote: { title: '', content: '' },
                     parsedContent: '',
-                    printMode: 'normal' // 'normal', 'hole', 'red'
+                    printMode: 'normal', // 'normal', 'hole', 'red'
+                    isMenuOpen: false,
+                    // 設定項目（ローカルストレージから読み込み）
+                    settings: {
+                        skipHint: window.appSettings.skipHint
+                    }
                 }
             },
             computed: {
@@ -185,6 +280,16 @@
                     return '';
                 }
             },
+            watch: {
+                // 設定が変更されたらローカルストレージとグローバル変数に即時保存
+                settings: {
+                    handler(newVal) {
+                        window.appSettings.skipHint = newVal.skipHint;
+                        localStorage.setItem('anki_skipHint', newVal.skipHint);
+                    },
+                    deep: true
+                }
+            },
             async mounted() {
                 await this.loadNotes();
             },
@@ -192,6 +297,7 @@
                 // 画面切り替え
                 changeView(view) {
                     this.currentView = view;
+                    this.isMenuOpen = false; // メニューを閉じる
                     window.scrollTo(0, 0);
                 },
                 // ノート一覧の読み込み
@@ -206,7 +312,6 @@
                 },
                 // 編集ボタン
                 editNote(note) {
-                    // オブジェクトのコピーを作成して編集中にリストが書き換わらないようにする
                     this.currentNote = { ...note };
                     this.changeView('edit');
                 },
@@ -218,10 +323,8 @@
                     };
                     
                     if (noteToSave.id) {
-                        // 更新
                         await db.notes.put(noteToSave);
                     } else {
-                        // 新規作成
                         await db.notes.add(noteToSave);
                     }
                     
@@ -257,7 +360,6 @@
                     let holeCounter = 1;
                     html = html.replace(/\{\{(.+?)\}\}/g, (match, word) => {
                         const num = holeCounter++;
-                        // ※エスケープ処理は簡易的です
                         return `<span class="blank-hole" data-answer="${word}" data-num="${num}" data-state="0" onclick="toggleHole(this)">${num}</span>`;
                     });
 
@@ -267,8 +369,27 @@
                     this.parsedContent = html;
                 },
                 // PDF出力（印刷ダイアログの呼び出し）
-                printPDF() {
-                    window.print();
+                printPDF(mode) {
+                    this.printMode = mode;
+                    this.isMenuOpen = false;
+
+                    // 💡 【重要ポイント】
+                    // 印刷時に穴埋め部分の「文字幅」を正しく確保するため、
+                    // 一旦すべての穴埋め要素を強制的に「State 2（解答全表示）」にする。
+                    // その上で、CSS側の設定で文字を透明化させて空欄を作る。
+                    this.$nextTick(() => {
+                        const holes = document.querySelectorAll('.blank-hole');
+                        holes.forEach(hole => {
+                            const answer = hole.getAttribute('data-answer');
+                            hole.setAttribute('data-state', '2');
+                            hole.innerText = answer;
+                        });
+
+                        // DOMの更新（文字幅の再計算）を少し待ってから印刷画面を立ち上げる
+                        setTimeout(() => {
+                            window.print();
+                        }, 300);
+                    });
                 }
             }
         }).mount('#app');
